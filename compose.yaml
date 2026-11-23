@@ -1,0 +1,188 @@
+
+name: docker-lab
+
+services:
+
+  db:
+    image: postgres:17
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+
+    ports:
+      - "127.0.0.1:5433:5432"
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+    networks:
+      - backend-network
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+
+    networks:
+      - backend-network
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  zipkin:
+    image: ghcr.io/openzipkin/zipkin-slim:latest
+    ports:
+      - "127.0.0.1:9411:9411"
+    environment:
+      STORAGE_TYPE: mem
+    networks:
+      - backend-network
+
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    hostname: rabbitmq
+    restart: unless-stopped
+
+    environment:
+      RABBITMQ_DEFAULT_USER: rabbitlab
+      RABBITMQ_DEFAULT_PASS: rabbitlab123
+      RABBITMQ_DEFAULT_VHOST: /
+
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+    networks:
+      - backend-network
+
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+
+  kafka:
+    image: apache/kafka:4.2.2
+    hostname: kafka
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:9092:9092"
+
+    environment:
+      CLUSTER_ID: "4L6g3nShT-eMCtK--X86sw"
+
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:29093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+
+      KAFKA_LISTENERS: "CONTROLLER://:29093,HOST://:9092,INTERNAL://:19092"
+
+      KAFKA_ADVERTISED_LISTENERS: "HOST://localhost:9092,INTERNAL://kafka:19092"
+
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,HOST:PLAINTEXT,INTERNAL:PLAINTEXT"
+
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+    networks:
+      - backend-network
+
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: docker-lab-app:1.0
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8081:8080"
+
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${DB_NAME}
+      DB_USERNAME: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      APP_MESSAGE: Hello from Docker Compose
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      PAYMENT_BASE_URL: http://payment-mock:8090
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: rabbitlab
+      RABBITMQ_PASS: rabbitlab123
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      KAFKA_INVENTORY_CONCURRENCY: "1"
+      LAB_KAFKA_CONTROLS_ENABLED: "false"
+      LAB_LOCKING_ENABLED: "false"
+      LAB_KAFKA_IDEMPOTENT_ENABLED: "false"
+      LAB_DISTRIBUTED_ENABLED: "false"
+      LAB_IDEMPOTENCY_ENABLED: "false"
+      LAB_SAGA_ENABLED: "false"
+      LAB_SAGA544_ENABLED: "false"
+      LAB_OUTBOX_ENABLED: "false"
+      LAB_FILE_UPLOAD_ENABLED: "true"
+
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+
+    networks:
+      - backend-network
+
+  payment-mock:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    command: [ "python", "-u", "/mock/server.py" ]
+    volumes:
+      - ./payment-mock/server.py:/mock/server.py:ro
+    networks:
+      - backend-network
+
+
+volumes:
+  postgres-data:
+  rabbitmq_data:
+  kafka_data:
+
+networks:
+  backend-network:
+    driver: bridge
