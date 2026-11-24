@@ -1,0 +1,54 @@
+
+name: Docker Lab - Spring Boot CI
+
+on:
+  push:
+    branches: [master]
+
+  pull_request:
+    branches: [master]
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and Test (Java 21)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      # 1. GitHub repository kodini olish
+      - name: Checkout source code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # 2. Java 21 o'rnatish
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # 3. Muhitni tekshirish
+      - name: Print Java and Maven versions
+        run: |
+          java -version
+          mvn -version
+
+      # 4. Compile + Test + Package
+      - name: Maven clean verify
+        run: mvn -B -ntp clean verify
+
+      # 5. Tayyor JAR'ni saqlash
+      - name: Upload Spring Boot JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-lab-jar-${{ github.sha }}
+          path: target/docker-lab-0.0.1-SNAPSHOT.jar
+          if-no-files-found: error
+          retention-days: 7
