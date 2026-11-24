@@ -44,6 +44,7 @@ services:
 
   zipkin:
     image: ghcr.io/openzipkin/zipkin-slim:latest
+    restart: unless-stopped
     ports:
       - "127.0.0.1:9411:9411"
     environment:
@@ -118,6 +119,25 @@ services:
     networks:
       - backend-network
 
+  minio:
+    image: pgsty/silo:RELEASE.2026-11-12T00-00-00Z
+    restart: unless-stopped
+
+    command: server /data --console-address ":9001"
+
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+
+    volumes:
+      - minio_data:/data
+
+    networks:
+      - backend-network
 
   app:
     build:
@@ -154,6 +174,14 @@ services:
       LAB_SAGA544_ENABLED: "false"
       LAB_OUTBOX_ENABLED: "false"
       LAB_FILE_UPLOAD_ENABLED: "true"
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      LAB_BATCH_ENABLED: "false"
+      LAB_BATCH549_INPUT_FILE: file:/batch-data/products.csv
+      LAB_BATCH549_ENABLED: "true"
+      LAB_BATCH549_CHUNK_SIZE: "1000"
+      LAB_BATCH549_FAIL_AT_ID: "0"
 
     depends_on:
       db:
@@ -164,6 +192,9 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+
+    volumes:
+        - ./batch-data:/batch-data:ro
 
     networks:
       - backend-network
@@ -182,6 +213,7 @@ volumes:
   postgres-data:
   rabbitmq_data:
   kafka_data:
+  minio_data:
 
 networks:
   backend-network:
